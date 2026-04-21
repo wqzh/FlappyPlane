@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>都市飞翼</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    font-family: 'Arial', sans-serif;
+  }
+  canvas {
+    border: 2px solid #333;
+    box-shadow: 0 0 30px rgba(0,0,0,0.5);
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// 画布尺寸
+const WIDTH = 480;
+const HEIGHT = 640;
+canvas.width = WIDTH;
+canvas.height = HEIGHT;
+
+// ==================== 游戏常量 ====================
+const GRAVITY = 0.45;
+const FLAP_POWER = -7.5;
+const MAX_FALL_SPEED = 10;
+const MAX_RISE_SPEED = -8;
+const BUILDING_WIDTH = 70;
+const GAP_HEIGHT_BASE = 195;
+const GAP_HEIGHT_MIN = 155;
+const BUILDING_SPACING = 310;
+const GROUND_HEIGHT = 60;
+const PLANE_SIZE = 28;
+const CLOUD_COUNT = 8;
+const DISTANT_BUILDING_COUNT = 15;
+
+// 难度配置
+const DIFFICULTY_CONFIG = {
+  easy: { gapHeight: 220, buildingSpeed: 2 },
+  normal: { gapHeight: 195, buildingSpeed: 2.5 },
+  hard: { gapHeight: 165, buildingSpeed: 3 }
+};
+
+// ==================== 数据模型 ====================
+// 用户信息
+let userProfile = JSON.parse(localStorage.getItem('flappyCity_userProfile')) || {
+  name: '飞行员',
+  avatarIndex: 0,
+  totalGames: 0,
+  totalScore: 0,
+  bestScore: 0
+};
+
+// 游戏设置
+let gameSettings = JSON.parse(localStorage.getItem('flappyCity_gameSettings')) || {
+  soundEnabled: true,
+  musicEnabled: true,
+  difficulty: 'normal',
+  vibration: true
+};
+
+// 游戏记录
+let gameHistory = JSON.parse(localStorage.getItem('flappyCity_gameHistory')) || [];
+
+// 当前最高分
+let highScore = parseInt(localStorage.getItem('flappyCity_highScore')) || 0;
+
+// 更新用户最高分
+if (highScore > userProfile.bestScore) {
+  userProfile.bestScore = highScore;
+  saveUserProfile();
+}
+
+// UI状态
+let uiState = 'start'; // start, settings, profile, history, gameOver
+let selectedButton = null;
+let hoveredButton = null;
+let inputText = userProfile.name;
+let showInput = false;
+let resetConfirmUntil = 0;
+
+// ==================== 按钮定义 ====================
+const buttons = {
+  start: [
+    { id: 'startGame', text: '开始游戏', x: WIDTH/2, y: HEIGHT/2 + 30, w: 200, h: 50 },
+    { id: 'myRecords', text: '我的记录', x: WIDTH/2, y: HEIGHT/2 + 100, w: 160, h: 45 },
+    { id: 'settings', text: '设置', x: WIDTH/2, y: HEIGHT/2 + 160, w: 160, h: 45 },
+    { id: 'profile', text: '个人资料', x: WIDTH/2, y: HEIGHT/2 + 220, w: 160, h: 45 }
+  ],
+  settings: [
+    { id: 'back', text: '← 返回', x: 60, y: 60, w: 100, h: 40 },
+    { id: 'soundToggle', text: '音效', x: WIDTH/2, y: 160, w: 120, h: 45, type: 'toggle' },
+    { id: 'musicToggle', text: '音乐', x: WIDTH/2, y: 230, w: 120, h: 45, type: 'toggle' },
+    { id: 'difficultyEasy', text: '简单', x: WIDTH/2 - 140, y: 310, w: 110, h: 45 },
+    { id: 'difficultyNormal', text: '普通', x: WIDTH/2, y: 310, w: 110, h: 45 },
+    { id: 'difficultyHard', text: '困难', x: WIDTH/2 + 140, y: 310, w: 110, h: 45 }
+  ],
+  profile: [
+    { id: 'back', text: '← 返回', x: 60, y: 60, w: 100, h: 40 },
+    { id: 'avatar0', text: '🛩', x: 120, y: 150, w: 50, h: 50, type: 'avatar', index: 0 },
+    { id: 'avatar1', text: '✈', x: 190, y: 150, w: 50, h: 50, type: 'avatar', index: 1 },
+    { id: 'avatar2', text: '🚀', x: 260, y: 150, w: 50, h: 50, type: 'avatar', index: 2 },
+    { id: 'avatar3', text: '🛫', x: 330, y: 150, w: 50, h: 50, type: 'avatar', index: 3 },
+    { id: 'saveName', text: '保存', x: WIDTH/2, y: 250, w: 100, h: 40 },
+    { id: 'resetData', text: '重置数据', x: WIDTH/2, y: 350, w: 160, h: 45 }
+  ],
+  history: [
+    { id: 'back', text: '← 返回', x: 60, y: 60, w: 100, h: 40 }
+  ],
+  gameOver: [
+    { id: 'restart', text: '再来一次', x: WIDTH/2, y: HEIGHT/2 + 30, w: 180, h: 50 },
+    { id: 'home', text: '返回首页', x: WIDTH/2, y: HEIGHT/2 + 100, w: 180, h: 45 }
+  ]
+};
+
+// ==================== 游戏状态 ====================
+let gameState = 'start'; // start, playing, gameover
+let score = 0;
+let frameCount = 0;
+let buildingSpeed = 2.5;
+let gapHeight = GAP_HEIGHT_BASE;
+
+// ==================== 飞机 ====================
+let plane = {
+  x: 100,
+  y: HEIGHT / 2 - 50,
+  width: PLANE_SIZE * 2,
+  height: PLANE_SIZE,
+  velocity: 0,
+  rotation: 0
+};
+
+// ==================== 大楼障碍 ====================
+let buildings = [];
+
+// ==================== 云朵 ====================
+let clouds = [];
+for (let i = 0; i < CLOUD_COUNT; i++) {
+  clouds.push({
+    x: Math.random() * WIDTH,
+    y: Math.random() * (HEIGHT - GROUND_HEIGHT - 150),
+    width: 60 + Math.random() * 80,
+    height: 25 + Math.random() * 20,
+    speed: 0.3 + Math.random() * 0.5
+  });
+}
+
+// ==================== 远景大厦 ====================
+let distantBuildings = [];
+for (let i = 0; i < DISTANT_BUILDING_COUNT; i++) {
+  distantBuildings.push({
+    x: i * (WIDTH / DISTANT_BUILDING_COUNT) + Math.random() * 30,
+    width: 30 + Math.random() * 40,
+    height: 80 + Math.random() * 200,
+    windows: Math.random() > 0.3,
+    antenna: Math.random() > 0.6
+  });
+}
+
+// ==================== 粒子效果 ====================
+let particles = [];
+let trailParticles = [];
+
+// ==================== 存储函数 ====================
+function saveUserProfile() {
+  localStorage.setItem('flappyCity_userProfile', JSON.stringify(userProfile));
+}
+
+function saveGameSettings() {
+  localStorage.setItem('flappyCity_gameSettings', JSON.stringify(gameSettings));
+}
+
+function saveGameHistory() {
+  localStorage.setItem('flappyCity_gameHistory', JSON.stringify(gameHistory));
+}
+
+function syncProfileButtonLayout() {
+  buttons.profile.forEach(btn => {
+    if (btn.id === 'back') {
+      btn.x = 60;
+      btn.y = 60;
+    } else if (btn.id === 'saveName') {
+      btn.x = WIDTH / 2;
+      btn.y = 300;
+    } else if (btn.id === 'resetData') {
+      btn.x = WIDTH / 2;
+      btn.y = 370;
+    } else if (btn.type === 'avatar') {
+      const index = parseInt(btn.id.replace('avatar', ''), 10);
+      btn.x = 120 + index * 70;
+      btn.y = 150;
+    }
+  });
+}
+
+function clearAllGameData() {
+  localStorage.removeItem('flappyCity_userProfile');
+  localStorage.removeItem('flappyCity_gameHistory');
+  localStorage.removeItem('flappyCity_highScore');
+  localStorage.removeItem('flappyCity_gameSettings');
+
+  userProfile = {
+    name: '飞行员',
+    avatarIndex: 0,
+    totalGames: 0,
+    totalScore: 0,
+    bestScore: 0
+  };
+  gameSettings = {
+    soundEnabled: true,
+    musicEnabled: true,
+    difficulty: 'normal',
+    vibration: true
+  };
+  gameHistory = [];
+  highScore = 0;
+  inputText = userProfile.name;
+  showInput = false;
+  resetConfirmUntil = 0;
+  uiState = 'start';
+  gameState = 'start';
+  resetGame();
+}
+
+function addHistoryRecord(score) {
+  const record = {
+    score: score,
+    date: new Date().toLocaleDateString('zh-CN'),
+    time: new Date().toLocaleTimeString('zh-CN'),
+    difficulty: gameSettings.difficulty
+  };
+  gameHistory.unshift(record);
+  // 按分数从高到低排序
+  gameHistory.sort((a, b) => b.score - a.score);
+  if (gameHistory.length > 10) gameHistory.pop();
+  saveGameHistory();
+}
+
+// ==================== 初始化大楼 ====================
+function initBuildings() {
+  const config = DIFFICULTY_CONFIG[gameSettings.difficulty] || DIFFICULTY_CONFIG.normal;
+  buildings = [];
+  buildingSpeed = config.buildingSpeed;
+  gapHeight = config.gapHeight;
+  for (let x = WIDTH; x < WIDTH * 2; x += BUILDING_SPACING) {
+    addBuilding(x);
+  }
+}
+
+function addBuilding(xPos) {
+  const minTop = 80;
+  const maxTop = HEIGHT - GROUND_HEIGHT - GAP_HEIGHT_MIN - 80;
+  const topHeight = minTop + Math.random() * (maxTop - minTop);
+  buildings.push({
+    x: xPos,
+    topHeight: topHeight,
+    passed: false
+  });
+}
+
+// ==================== 重置游戏 ====================
+function resetGame() {
+  plane.y = HEIGHT / 2 - 50;
+  plane.velocity = 0;
+  plane.rotation = 0;
+  score = 0;
+  frameCount = 0;
+  particles = [];
+  trailParticles = [];
+  initBuildings();
+}
+
+// ==================== 绘制函数 ====================
+function drawSky() {
+  const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT - GROUND_HEIGHT);
+  gradient.addColorStop(0, '#87CEEB');
+  gradient.addColorStop(0.5, '#B0E0E6');
+  gradient.addColorStop(1, '#E0F0FF');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT - GROUND_HEIGHT);
+
+  ctx.beginPath();
+  ctx.arc(WIDTH - 80, 80, 50, 0, Math.PI * 2);
+  const sunGrad = ctx.createRadialGradient(WIDTH - 80, 80, 10, WIDTH - 80, 80, 60);
+  sunGrad.addColorStop(0, 'rgba(255, 255, 200, 0.8)');
+  sunGrad.addColorStop(0.5, 'rgba(255, 255, 200, 0.3)');
+  sunGrad.addColorStop(1, 'rgba(255, 255, 200, 0)');
+  ctx.fillStyle = sunGrad;
+  ctx.fill();
+}
+
+function drawClouds() {
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+  clouds.forEach(cloud => {
+    ctx.beginPath();
+    ctx.ellipse(cloud.x, cloud.y, cloud.width / 2, cloud.height / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cloud.x - cloud.width / 4, cloud.y + 5, cloud.width / 3, cloud.height / 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cloud.x + cloud.width / 4, cloud.y + 3, cloud.width / 3, cloud.height / 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function updateClouds() {
+  clouds.forEach(cloud => {
+    cloud.x -= cloud.speed;
+    if (cloud.x + cloud.width / 2 < 0) {
+      cloud.x = WIDTH + cloud.width / 2;
+      cloud.y = Math.random() * (HEIGHT - GROUND_HEIGHT - 150);
+    }
+  });
+}
+
+function drawDistantBuildings() {
+  distantBuildings.forEach(b => {
+    const bX = ((b.x - frameCount * 0.3) % (WIDTH + 100));
+    const drawX = bX < 0 ? bX + WIDTH + 100 : bX;
+    const bottom = HEIGHT - GROUND_HEIGHT;
+    ctx.fillStyle = '#4a5568';
+    ctx.fillRect(drawX, bottom - b.height, b.width, b.height);
+    if (b.windows) {
+      ctx.fillStyle = 'rgba(200, 220, 255, 0.6)';
+      for (let wy = bottom - b.height + 10; wy < bottom - 10; wy += 15) {
+        for (let wx = drawX + 5; wx < drawX + b.width - 5; wx += 12) {
+          if (Math.random() > 0.2) {
+            ctx.fillRect(wx, wy, 6, 8);
+          }
+        }
+      }
+    }
+    if (b.antenna) {
+      ctx.strokeStyle = '#4a5568';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(drawX + b.width / 2, bottom - b.height);
+      ctx.lineTo(drawX + b.width / 2, bottom - b.height - 25);
+      ctx.stroke();
+    }
+  });
+}
+
+function drawGround() {
+  ctx.fillStyle = '#4a7c59';
+  ctx.fillRect(0, HEIGHT - GROUND_HEIGHT, WIDTH, 20);
+  ctx.fillStyle = '#8B7355';
+  ctx.fillRect(0, HEIGHT - GROUND_HEIGHT + 20, WIDTH, GROUND_HEIGHT - 20);
+  ctx.fillStyle = '#5a8c69';
+  for (let x = 0; x < WIDTH; x += 8) {
+    const offset = ((-frameCount * buildingSpeed) % 8 + 8) % 8;
+    ctx.fillRect(x + offset, HEIGHT - GROUND_HEIGHT, 4, 8);
+  }
+}
+
+function drawPlane() {
+  ctx.save();
+  ctx.translate(plane.x + plane.width / 2, plane.y + plane.height / 2);
+  ctx.rotate(plane.rotation);
+  ctx.fillStyle = '#E8E8E8';
+  ctx.strokeStyle = '#999';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, plane.width / 2, plane.height / 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#87CEEB';
+  ctx.beginPath();
+  ctx.ellipse(plane.width / 5, -plane.height / 6, 6, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#D0D0D0';
+  ctx.beginPath();
+  ctx.moveTo(-2, -plane.height / 2);
+  ctx.lineTo(-8, -plane.height / 2 - 10);
+  ctx.lineTo(4, -plane.height / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-2, plane.height / 2);
+  ctx.lineTo(-8, plane.height / 2 + 10);
+  ctx.lineTo(4, plane.height / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#C0C0C0';
+  ctx.beginPath();
+  ctx.moveTo(-plane.width / 2 + 2, 0);
+  ctx.lineTo(-plane.width / 2 - 6, -8);
+  ctx.lineTo(-plane.width / 2 + 6, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  const propAngle = frameCount * 0.5;
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(plane.width / 2 + 2 + Math.cos(propAngle) * 6, -plane.height / 4);
+  ctx.lineTo(plane.width / 2 + 2 - Math.cos(propAngle) * 6, plane.height / 4);
+  ctx.stroke();
+  if (gameState === 'playing' && frameCount % 2 === 0) {
+    trailParticles.push({
+      x: plane.x - 5,
+      y: plane.y + plane.height / 2 + (Math.random() - 0.5) * 6,
+      life: 15, maxLife: 15, size: 3 + Math.random() * 3
+    });
+  }
+  ctx.restore();
+}
+
+function updateTrailParticles() {
+  for (let i = trailParticles.length - 1; i >= 0; i--) {
+    trailParticles[i].x -= buildingSpeed;
+    trailParticles[i].life--;
+    if (trailParticles[i].life <= 0) {
+      trailParticles.splice(i, 1);
+    }
+  }
+}
+
+function drawTrailParticles() {
+  trailParticles.forEach(p => {
+    const alpha = p.life / p.maxLife;
+    ctx.fillStyle = `rgba(255, ${150 + Math.random() * 100}, 50, ${alpha * 0.6})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawBuildings() {
+  buildings.forEach(b => {
+    const bottomY = HEIGHT - GROUND_HEIGHT;
+    drawBuildingSection(b.x, 0, BUILDING_WIDTH, b.topHeight, true);
+    drawBuildingSection(b.x, b.topHeight + gapHeight, BUILDING_WIDTH, bottomY - (b.topHeight + gapHeight), false);
+  });
+}
+
+function drawBuildingSection(x, y, width, height, isTop) {
+  const gradient = ctx.createLinearGradient(x, 0, x + width, 0);
+  gradient.addColorStop(0, '#6B7B8D');
+  gradient.addColorStop(0.3, '#8899A6');
+  gradient.addColorStop(0.7, '#7A8B99');
+  gradient.addColorStop(1, '#5C6B7A');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, width, height);
+  const windowRows = Math.floor(height / 20);
+  const windowCols = Math.floor(width / 16);
+  for (let row = 1; row < windowRows; row++) {
+    for (let col = 1; col < windowCols; col++) {
+      const wx = x + col * 16;
+      const wy = y + row * 20;
+      if (wy > y + 5 && wy + 12 < y + height - 5) {
+        ctx.fillStyle = Math.random() > 0.5 ? 'rgba(200, 230, 255, 0.7)' : 'rgba(100, 120, 140, 0.5)';
+        ctx.fillRect(wx, wy, 8, 12);
+      }
+    }
+  }
+  if (isTop) {
+    ctx.fillStyle = '#5C6B7A';
+    ctx.fillRect(x - 3, y + height - 5, width + 6, 8);
+  } else {
+    ctx.fillStyle = '#5C6B7A';
+    ctx.fillRect(x - 3, y, width + 6, 8);
+  }
+  if (height > 100 && (x + y) % 150 < 60) {
+    ctx.strokeStyle = '#5C6B7A';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const antennaX = x + width / 2;
+    const antennaY = isTop ? y + height : y;
+    ctx.moveTo(antennaX, antennaY);
+    ctx.lineTo(antennaX, antennaY - 18);
+    ctx.stroke();
+    const blink = Math.sin(frameCount * 0.1) > 0;
+    ctx.fillStyle = blink ? '#FF4444' : '#660000';
+    ctx.beginPath();
+    ctx.arc(antennaX, antennaY - 18, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function updateBuildings() {
+  buildings.forEach((b, index) => {
+    b.x -= buildingSpeed;
+    if (!b.passed && b.x + BUILDING_WIDTH < plane.x) {
+      b.passed = true;
+      score++;
+      if (score % 5 === 0) {
+        gapHeight = Math.max(GAP_HEIGHT_MIN, gapHeight - 5);
+        buildingSpeed += 0.15;
+      }
+    }
+    if (b.x + BUILDING_WIDTH < 0) {
+      buildings.splice(index, 1);
+      const lastBuilding = buildings[buildings.length - 1];
+      const newX = lastBuilding ? lastBuilding.x + BUILDING_SPACING : WIDTH;
+      addBuilding(newX);
+    }
+  });
+}
+
+function checkCollision() {
+  const px = plane.x + 4;
+  const py = plane.y + 3;
+  const pw = plane.width - 8;
+  const ph = plane.height - 6;
+  if (py + ph >= HEIGHT - GROUND_HEIGHT || py <= 0) return true;
+  for (let b of buildings) {
+    if (px + pw > b.x && px < b.x + BUILDING_WIDTH) {
+      if (py < b.topHeight || py + ph > b.topHeight + gapHeight) return true;
+    }
+  }
+  return false;
+}
+
+function createExplosion(x, y) {
+  for (let i = 0; i < 30; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8,
+      life: 30 + Math.random() * 20,
+      maxLife: 50,
+      size: 3 + Math.random() * 5,
+      color: Math.random() > 0.5 ? '#FF6B35' : '#FFD700'
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    particles[i].x += particles[i].vx;
+    particles[i].y += particles[i].vy;
+    particles[i].vy += 0.15;
+    particles[i].life--;
+    if (particles[i].life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    const alpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+// ==================== UI绘制函数 ====================
+function drawButton(btn, label, isHovered) {
+  ctx.fillStyle = isHovered ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.15)';
+  ctx.beginPath();
+  roundRect(ctx, btn.x - btn.w/2, btn.y - btn.h/2, btn.w, btn.h, 10);
+  ctx.fill();
+  ctx.strokeStyle = isHovered ? '#FFFFFF' : 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = isHovered ? 2 : 1;
+  ctx.stroke();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = isHovered ? 'bold 20px Arial' : '20px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, btn.x, btn.y);
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawToggleBtn(btn, label, isOn) {
+  drawButton(btn, label + (isOn ? ' ✓' : ' ✗'));
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
+function isPointInButton(px, py, btn) {
+  return px >= btn.x - btn.w/2 && px <= btn.x + btn.w/2 &&
+         py >= btn.y - btn.h/2 && py <= btn.y + btn.h/2;
+}
+
+function drawStartScreen() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // 头像
+  const avatars = ['🛩', '✈', '🚀', '🛫'];
+  ctx.font = '48px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(avatars[userProfile.avatarIndex % avatars.length], WIDTH/2, HEIGHT/2 - 140);
+
+  // 用户名
+  ctx.font = '24px Arial';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText(userProfile.name, WIDTH/2, HEIGHT/2 - 100);
+
+  // 最高分
+  if (highScore > 0) {
+    ctx.font = '18px Arial';
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText('最高分: ' + highScore, WIDTH/2, HEIGHT/2 - 70);
+  }
+
+  // 标题
+  ctx.font = 'bold 52px Arial';
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 5;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.strokeText('都 市 飞 翼', WIDTH / 2, HEIGHT / 2 - 190);
+  ctx.fillText('都 市 飞 翼', WIDTH / 2, HEIGHT / 2 - 190);
+
+  ctx.font = '22px Arial';
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.lineWidth = 3;
+  ctx.fillStyle = '#E0F0FF';
+  ctx.strokeText('穿越都市大厦', WIDTH / 2, HEIGHT / 2 - 160);
+  ctx.fillText('穿越都市大厦', WIDTH / 2, HEIGHT / 2 - 160);
+
+  // 按钮
+  const btns = buttons.start;
+  btns.forEach(btn => {
+    const isHovered = hoveredButton === btn.id;
+    drawButton(btn, btn.text, isHovered);
+  });
+}
+
+function drawSettingsScreen() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  ctx.font = 'bold 32px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('设 置', WIDTH/2, 100);
+
+  ctx.font = '20px Arial';
+  ctx.fillStyle = '#B0C4DE';
+  ctx.fillText('音效设置', WIDTH/2, 130);
+
+  drawToggleBtn(buttons.settings[1], '音效', gameSettings.soundEnabled);
+  drawToggleBtn(buttons.settings[2], '音乐', gameSettings.musicEnabled);
+
+  ctx.font = '20px Arial';
+  ctx.fillStyle = '#B0C4DE';
+  ctx.fillText('难度选择', WIDTH/2, 280);
+
+  const diffBtns = [buttons.settings[3], buttons.settings[4], buttons.settings[5]];
+  const diffNames = ['简单', '普通', '困难'];
+  const diffKeys = ['easy', 'normal', 'hard'];
+  diffBtns.forEach((btn, i) => {
+    const isActive = gameSettings.difficulty === diffKeys[i];
+    ctx.fillStyle = isActive ? 'rgba(255,215,0,0.5)' : 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    roundRect(ctx, btn.x - btn.w/2, btn.y - btn.h/2, btn.w, btn.h, 10);
+    ctx.fill();
+    ctx.strokeStyle = isActive ? '#FFD700' : 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = isActive ? 2 : 1;
+    ctx.stroke();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = isActive ? 'bold 18px Arial' : '18px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(diffNames[i], btn.x, btn.y);
+    ctx.textBaseline = 'alphabetic';
+  });
+
+  drawButton(buttons.settings[0], '← 返回', hoveredButton === 'back');
+}
+
+function drawProfileScreen() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  syncProfileButtonLayout();
+
+  ctx.font = 'bold 32px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('个 人 资 料', WIDTH/2, 100);
+
+  const avatars = ['🛩', '✈', '🚀', '🛫'];
+  buttons.profile.forEach(btn => {
+    if (btn.type === 'avatar') {
+      const isActive = userProfile.avatarIndex === btn.index;
+      ctx.fillStyle = isActive ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.1)';
+      ctx.beginPath();
+      roundRect(ctx, btn.x - btn.w/2, btn.y - btn.h/2, btn.w, btn.h, 10);
+      ctx.fill();
+      ctx.strokeStyle = isActive ? '#FFD700' : 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = isActive ? 2 : 1;
+      ctx.stroke();
+      ctx.font = '28px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(avatars[btn.index], btn.x, btn.y);
+      ctx.textBaseline = 'alphabetic';
+    }
+  });
+
+  ctx.font = '20px Arial';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('用户名', WIDTH/2, 220);
+
+  if (showInput) {
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    roundRect(ctx, WIDTH/2 - 100, 230, 200, 40, 5);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.font = '20px Arial';
+    ctx.fillText(inputText, WIDTH/2, 255);
+  } else {
+    ctx.fillStyle = '#B0C4DE';
+    ctx.font = '20px Arial';
+    ctx.fillText(userProfile.name, WIDTH/2, 255);
+  }
+
+  // 根据按钮ID绘制按钮，确保点击区域正确
+  const saveBtn = buttons.profile.find(btn => btn.id === 'saveName');
+  const resetBtn = buttons.profile.find(btn => btn.id === 'resetData');
+  const backBtn = buttons.profile.find(btn => btn.id === 'back');
+  
+  if (saveBtn) drawButton(saveBtn, '保存', hoveredButton === 'saveName');
+  if (resetBtn) drawButton(resetBtn, '重置数据', hoveredButton === 'resetData');
+  if (backBtn) drawButton(backBtn, '← 返回', hoveredButton === 'back');
+
+  if (Date.now() <= resetConfirmUntil) {
+    ctx.font = '16px Arial';
+    ctx.fillStyle = '#FFB3B3';
+    ctx.fillText('再次点击"重置数据"确认清空所有记录', WIDTH / 2, 410);
+  }
+
+  // 统计
+  ctx.font = '18px Arial';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('总游戏次数: ' + userProfile.totalGames, WIDTH/2, 440);
+  ctx.fillText('累计得分: ' + userProfile.totalScore, WIDTH/2, 470);
+  ctx.fillText('最高分: ' + userProfile.bestScore, WIDTH/2, 500);
+}
+
+function drawHistoryScreen() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  ctx.font = 'bold 32px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('我的记录', WIDTH/2, 100);
+
+  if (gameHistory.length === 0) {
+    ctx.font = '20px Arial';
+    ctx.fillStyle = '#B0C4DE';
+    ctx.fillText('暂无记录', WIDTH/2, HEIGHT/2);
+  } else {
+    ctx.font = '14px Arial';
+    // 限制最多显示10条记录
+    const displayRecords = gameHistory.slice(0, 10);
+    displayRecords.forEach((record, i) => {
+      const y = 160 + i * 55;
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.beginPath();
+      roundRect(ctx, 40, y - 25, WIDTH - 80, 45, 8);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'left';
+      // 将排名和分数显示在同一行
+      ctx.fillStyle = '#FF4D4F';
+      ctx.fillText('#' + (i + 1) + ' ' + record.score + '分', 60, y);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.fillText(record.difficulty === 'easy' ? '简单' : record.difficulty === 'normal' ? '普通' : '困难', WIDTH/2, y);
+      ctx.textAlign = 'right';
+      ctx.fillText(record.date, WIDTH - 60, y - 10);
+      ctx.fillText(record.time, WIDTH - 60, y + 10);
+      ctx.textAlign = 'center';
+    });
+  }
+
+  drawButton(buttons.history[0], '← 返回', hoveredButton === 'back');
+}
+
+function drawGameOverScreen() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  ctx.font = 'bold 52px Arial';
+  ctx.textAlign = 'center';
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 5;
+  ctx.fillStyle = '#FF6B6B';
+  ctx.strokeText('游 戏 结 束', WIDTH / 2, HEIGHT / 2 - 120);
+  ctx.fillText('游 戏 结 束', WIDTH / 2, HEIGHT / 2 - 120);
+
+  ctx.font = '28px Arial';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.strokeText('最终得分：' + score, WIDTH / 2, HEIGHT / 2 - 60);
+  ctx.fillText('最终得分：' + score, WIDTH / 2, HEIGHT / 2 - 60);
+
+  const isNewRecord = score >= highScore && score > 0;
+  ctx.font = '24px Arial';
+  ctx.fillStyle = '#FFD700';
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.strokeText('最高分：' + highScore, WIDTH / 2, HEIGHT / 2 - 20);
+  ctx.fillText('最高分：' + highScore, WIDTH / 2, HEIGHT / 2 - 20);
+
+  if (isNewRecord) {
+    ctx.font = 'bold 20px Arial';
+    ctx.fillStyle = '#FFD700';
+    const blink = Math.sin(frameCount * 0.1) > 0;
+    if (blink) ctx.fillText('新纪录！', WIDTH / 2, HEIGHT / 2 + 20);
+  }
+
+  const btns = buttons.gameOver;
+  btns.forEach(btn => {
+    drawButton(btn, btn.text, hoveredButton === btn.id);
+  });
+}
+
+// ==================== 更新飞机 ====================
+function updatePlane() {
+  plane.velocity += GRAVITY;
+  plane.velocity = Math.max(MAX_RISE_SPEED, Math.min(MAX_FALL_SPEED, plane.velocity));
+  plane.y += plane.velocity;
+  if (plane.velocity < 0) {
+    plane.rotation = Math.max(-0.5, plane.velocity * 0.06);
+  } else {
+    plane.rotation = Math.min(1.2, plane.velocity * 0.08);
+  }
+}
+
+// ==================== 按钮点击处理 ====================
+function handleButtonClick(x, y) {
+  let currentButtons = [];
+
+  if (uiState === 'profile') {
+    syncProfileButtonLayout();
+  }
+
+  switch (uiState) {
+    case 'start':
+      currentButtons = buttons.start;
+      break;
+    case 'settings':
+      currentButtons = buttons.settings;
+      break;
+    case 'profile':
+      currentButtons = buttons.profile;
+      break;
+    case 'history':
+      currentButtons = buttons.history;
+      break;
+    case 'gameOver':
+      currentButtons = buttons.gameOver;
+      break;
+  }
+
+  for (let btn of currentButtons) {
+    if (isPointInButton(x, y, btn)) {
+      processButtonClick(btn);
+      return;
+    }
+  }
+}
+
+function processButtonClick(btn) {
+  switch (uiState) {
+    case 'start':
+      if (btn.id === 'startGame') {
+        gameState = 'playing';
+        resetGame();
+        // 不需要设置uiState为'playing'，因为游戏进行时不会显示UI界面
+      } else if (btn.id === 'myRecords') {
+        uiState = 'history';
+      } else if (btn.id === 'settings') {
+        uiState = 'settings';
+      } else if (btn.id === 'profile') {
+        uiState = 'profile';
+      }
+      break;
+    case 'settings':
+      if (btn.id === 'back') {
+        uiState = 'start';
+      } else if (btn.id === 'soundToggle') {
+        gameSettings.soundEnabled = !gameSettings.soundEnabled;
+        saveGameSettings();
+      } else if (btn.id === 'musicToggle') {
+        gameSettings.musicEnabled = !gameSettings.musicEnabled;
+        saveGameSettings();
+      } else if (btn.id.startsWith('difficulty')) {
+        const diff = btn.id.replace('difficulty', '').toLowerCase();
+        gameSettings.difficulty = diff;
+        saveGameSettings();
+      }
+      break;
+    case 'profile':
+      if (btn.id === 'back') {
+        uiState = 'start';
+        showInput = false;
+      } else if (btn.type === 'avatar') {
+        userProfile.avatarIndex = btn.index;
+        saveUserProfile();
+      } else if (btn.id === 'saveName') {
+        if (inputText.trim()) {
+          userProfile.name = inputText.trim();
+          saveUserProfile();
+        }
+        showInput = false;
+      } else if (btn.id === 'resetData') {
+        const now = Date.now();
+        if (now > resetConfirmUntil) {
+          resetConfirmUntil = now + 3000;
+          return;
+        }
+        clearAllGameData();
+      }
+      break;
+    case 'history':
+      if (btn.id === 'back') {
+        uiState = 'start';
+      }
+      break;
+    case 'gameOver':
+      if (btn.id === 'restart') {
+        gameState = 'playing';
+        resetGame();
+        // 不需要设置uiState为'playing'，因为游戏进行时不会显示UI界面
+      } else if (btn.id === 'home') {
+        gameState = 'start';
+        resetGame();
+        uiState = 'start';
+      }
+      break;
+  }
+}
+
+// 开始界面输入框点击
+function handleStartScreenClick(x, y) {
+  if (showInput) {
+    if (x >= WIDTH/2 - 100 && x <= WIDTH/2 + 100 && y >= 230 && y <= 270) {
+      // 在输入框内，不处理
+      return;
+    } else {
+      showInput = false;
+      return;
+    }
+  }
+  // 点击用户名区域，开始编辑
+  if (y >= 200 && y <= 280 && x >= WIDTH/2 - 100 && x <= WIDTH/2 + 100) {
+    showInput = true;
+    inputText = userProfile.name;
+  }
+}
+
+// ==================== 按键处理 ====================
+function flap() {
+  if (gameState === 'start') {
+    gameState = 'playing';
+    resetGame();
+    plane.velocity = FLAP_POWER;
+  } else if (gameState === 'playing') {
+    plane.velocity = FLAP_POWER;
+  } else if (gameState === 'gameover') {
+    gameState = 'start';
+    particles = [];
+    trailParticles = [];
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (gameState !== 'playing') {
+      flap();
+    }
+  }
+});
+
+// ==================== 触摸/点击支持 ====================
+let lastTapTime = 0;
+let isProcessingClick = false;
+
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = WIDTH / rect.width;
+  const scaleY = HEIGHT / rect.height;
+  let clientX, clientY;
+  if (e.touches) {
+    clientX = e.touches[0].clientX;
+    clientY = e.touches[0].clientY;
+  } else {
+    clientX = e.clientX;
+    clientY = e.clientY;
+  }
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY
+  };
+}
+
+function handleCanvasClick(x, y) {
+  // 防止重复处理
+  const now = Date.now();
+  if (now - lastTapTime < 100 || isProcessingClick) return;
+  lastTapTime = now;
+  isProcessingClick = true;
+
+  // 游戏进行中，只做飞行操作
+  if (gameState === 'playing' && uiState !== 'settings' && uiState !== 'profile' && uiState !== 'history') {
+    plane.velocity = FLAP_POWER;
+    setTimeout(() => { isProcessingClick = false; }, 50);
+    return;
+  }
+
+  // 同步 gameState 和 uiState（防止状态不一致）
+  if (uiState === 'gameOver' && gameState !== 'gameover') {
+    gameState = 'gameover';
+  } else if (uiState === 'start' && gameState === 'gameover') {
+    gameState = 'start';
+  } else if (uiState === 'settings' || uiState === 'profile' || uiState === 'history') {
+    // 确保在设置、个人资料和历史记录界面时，游戏状态不会影响按钮点击
+    gameState = 'start';
+  }
+
+  // 处理当前 UI 状态下的按钮点击
+  handleButtonClick(x, y);
+
+  // 处理用户名编辑
+  if (uiState === 'start') {
+    handleStartScreenClick(x, y);
+  } else if (uiState === 'profile') {
+    // 检查是否点击了按钮，如果没有再处理用户名编辑
+    let clickedButton = false;
+    for (let btn of buttons.profile) {
+      if (isPointInButton(x, y, btn)) {
+        clickedButton = true;
+        break;
+      }
+    }
+    
+    if (!clickedButton) {
+      // 点击用户名区域，开始编辑
+      if (y >= 200 && y <= 280 && x >= WIDTH/2 - 100 && x <= WIDTH/2 + 100) {
+        const nextName = window.prompt('请输入用户名', userProfile.name);
+        if (nextName !== null) {
+          const trimmed = nextName.trim();
+          inputText = trimmed || userProfile.name;
+        }
+        showInput = false;
+      }
+    }
+  }
+
+  setTimeout(() => { isProcessingClick = false; }, 50);
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  const pos = getPos(e);
+  handleCanvasClick(pos.x, pos.y);
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const pos = getPos(e);
+  hoveredButton = null;
+
+  let currentButtons = [];
+  switch (uiState) {
+    case 'start': currentButtons = buttons.start; break;
+    case 'settings': currentButtons = buttons.settings; break;
+    case 'profile':
+      syncProfileButtonLayout();
+      currentButtons = buttons.profile;
+      break;
+    case 'history': currentButtons = buttons.history; break;
+    case 'gameOver': currentButtons = buttons.gameOver; break;
+  }
+
+  for (let btn of currentButtons) {
+    if (isPointInButton(pos.x, pos.y, btn)) {
+      hoveredButton = btn.id;
+      break;
+    }
+  }
+});
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const pos = getPos(e);
+  handleCanvasClick(pos.x, pos.y);
+}, {passive: false});
+
+// ==================== 主游戏循环 ====================
+function gameLoop() {
+  frameCount++;
+
+  drawSky();
+  updateClouds();
+  drawClouds();
+  drawDistantBuildings();
+  drawGround();
+
+  if (gameState === 'playing') {
+    updatePlane();
+    updateBuildings();
+    updateTrailParticles();
+
+    if (checkCollision()) {
+      gameState = 'gameover';
+      createExplosion(plane.x + plane.width / 2, plane.y + plane.height / 2);
+
+      // 更新统计数据
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('flappyCity_highScore', highScore);
+      }
+      userProfile.totalGames++;
+      userProfile.totalScore += score;
+      if (score > userProfile.bestScore) {
+        userProfile.bestScore = score;
+      }
+      saveUserProfile();
+      addHistoryRecord(score);
+
+      uiState = 'gameOver';
+    }
+  }
+
+  drawBuildings();
+  drawTrailParticles();
+
+  if (gameState === 'playing' || gameState === 'start') {
+    if (gameState === 'start') {
+      plane.y = HEIGHT / 2 - 50 + Math.sin(frameCount * 0.05) * 15;
+      plane.rotation = Math.sin(frameCount * 0.05) * 0.1;
+    }
+    drawPlane();
+  }
+
+  updateParticles();
+  drawParticles();
+
+  // 绘制分数（游戏中）
+  if (gameState === 'playing') {
+    ctx.save();
+    ctx.font = 'bold 42px Arial';
+    ctx.textAlign = 'center';
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 4;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeText('楼层：' + score, WIDTH / 2, 60);
+    ctx.fillText('楼层：' + score, WIDTH / 2, 60);
+    ctx.restore();
+  }
+
+  // 绘制UI界面
+  if (uiState === 'settings') {
+    drawSettingsScreen();
+  } else if (uiState === 'profile') {
+    drawProfileScreen();
+  } else if (uiState === 'history') {
+    drawHistoryScreen();
+  } else if (gameState === 'gameover') {
+    drawGameOverScreen();
+  } else if (gameState === 'start') {
+    drawStartScreen();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ==================== 启动游戏 ====================
+initBuildings();
+gameLoop();
+</script>
+</body>
+</html>

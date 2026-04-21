@@ -1,0 +1,31 @@
+# Android
+android-app/.gradle/
+android-app/.idea/
+android-app/app/build/
+android-app/build/
+android-app/local.properties
+
+# Web
+node_modules/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+.cache
