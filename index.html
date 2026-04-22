@@ -33,6 +33,10 @@ const HEIGHT = 640;
 canvas.width = WIDTH;
 canvas.height = HEIGHT;
 
+// 让画布可聚焦,确保键盘事件可靠触发(尤其是空格键)
+canvas.tabIndex = 0;
+canvas.style.outline = 'none';
+
 // ==================== 游戏常量 ====================
 const GRAVITY = 0.45;
 const FLAP_POWER = -7.5;
@@ -75,14 +79,13 @@ let gameSettings = JSON.parse(localStorage.getItem('flappyCity_gameSettings')) |
 // 游戏记录
 let gameHistory = JSON.parse(localStorage.getItem('flappyCity_gameHistory')) || [];
 
-// 当前最高分
-let highScore = parseInt(localStorage.getItem('flappyCity_highScore')) || 0;
-
-// 更新用户最高分
-if (highScore > userProfile.bestScore) {
-  userProfile.bestScore = highScore;
-  saveUserProfile();
+// 当前最高分(网页版不持久化,避免跨人残留)
+localStorage.removeItem('flappyCity_highScore');
+if (typeof userProfile.bestScore === 'number' && userProfile.bestScore !== 0) {
+  userProfile.bestScore = 0;
+  localStorage.setItem('flappyCity_userProfile', JSON.stringify(userProfile));
 }
+let highScore = 0;
 
 // UI状态
 let uiState = 'start'; // start, settings, profile, history, gameOver
@@ -257,10 +260,10 @@ function drawClouds() {
     ctx.ellipse(cloud.x, cloud.y, cloud.width / 2, cloud.height / 2, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(cloud.x - cloud.width / 4, cloud.y + 5, cloud.width / 3, cloud.height / 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(cloud.x + cloud.width * 0.35, cloud.y - cloud.height * 0.2, cloud.width / 3, cloud.height / 2.5, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(cloud.x + cloud.width / 4, cloud.y + 3, cloud.width / 3, cloud.height / 2.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(cloud.x - cloud.width * 0.35, cloud.y - cloud.height * 0.15, cloud.width / 3.5, cloud.height / 2.8, 0, 0, Math.PI * 2);
     ctx.fill();
   });
 }
@@ -268,50 +271,72 @@ function drawClouds() {
 function updateClouds() {
   clouds.forEach(cloud => {
     cloud.x -= cloud.speed;
-    if (cloud.x + cloud.width / 2 < 0) {
-      cloud.x = WIDTH + cloud.width / 2;
+    if (cloud.x + cloud.width < 0) {
+      cloud.x = WIDTH + cloud.width;
       cloud.y = Math.random() * (HEIGHT - GROUND_HEIGHT - 150);
     }
   });
 }
 
 function drawDistantBuildings() {
-  distantBuildings.forEach(b => {
-    const bX = ((b.x - frameCount * 0.3) % (WIDTH + 100));
-    const drawX = bX < 0 ? bX + WIDTH + 100 : bX;
-    const bottom = HEIGHT - GROUND_HEIGHT;
-    ctx.fillStyle = '#4a5568';
-    ctx.fillRect(drawX, bottom - b.height, b.width, b.height);
-    if (b.windows) {
-      ctx.fillStyle = 'rgba(200, 220, 255, 0.6)';
-      for (let wy = bottom - b.height + 10; wy < bottom - 10; wy += 15) {
-        for (let wx = drawX + 5; wx < drawX + b.width - 5; wx += 12) {
-          if (Math.random() > 0.2) {
-            ctx.fillRect(wx, wy, 6, 8);
-          }
+  distantBuildings.forEach(building => {
+    const gradient = ctx.createLinearGradient(building.x, HEIGHT - GROUND_HEIGHT, building.x, HEIGHT - GROUND_HEIGHT - building.height);
+    gradient.addColorStop(0, '#9DBCD4');
+    gradient.addColorStop(1, '#B8D4E8');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(building.x, HEIGHT - GROUND_HEIGHT - building.height, building.width, building.height);
+
+    if (building.windows) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      const rows = Math.floor(building.height / 15);
+      const cols = Math.floor(building.width / 12);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          ctx.fillRect(
+            building.x + c * 12 + 3,
+            HEIGHT - GROUND_HEIGHT - building.height + r * 15 + 3,
+            6,
+            8
+          );
         }
       }
     }
-    if (b.antenna) {
-      ctx.strokeStyle = '#4a5568';
+
+    if (building.antenna) {
+      ctx.strokeStyle = '#8AACC8';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(drawX + b.width / 2, bottom - b.height);
-      ctx.lineTo(drawX + b.width / 2, bottom - b.height - 25);
+      ctx.moveTo(building.x + building.width / 2, HEIGHT - GROUND_HEIGHT - building.height);
+      ctx.lineTo(building.x + building.width / 2, HEIGHT - GROUND_HEIGHT - building.height - 20);
       ctx.stroke();
+      ctx.fillStyle = '#FF6B6B';
+      ctx.beginPath();
+      ctx.arc(building.x + building.width / 2, HEIGHT - GROUND_HEIGHT - building.height - 20, 3, 0, Math.PI * 2);
+      ctx.fill();
     }
   });
 }
 
 function drawGround() {
-  ctx.fillStyle = '#4a7c59';
-  ctx.fillRect(0, HEIGHT - GROUND_HEIGHT, WIDTH, 20);
-  ctx.fillStyle = '#8B7355';
-  ctx.fillRect(0, HEIGHT - GROUND_HEIGHT + 20, WIDTH, GROUND_HEIGHT - 20);
-  ctx.fillStyle = '#5a8c69';
-  for (let x = 0; x < WIDTH; x += 8) {
-    const offset = ((-frameCount * buildingSpeed) % 8 + 8) % 8;
-    ctx.fillRect(x + offset, HEIGHT - GROUND_HEIGHT, 4, 8);
+  const gradient = ctx.createLinearGradient(0, HEIGHT - GROUND_HEIGHT, 0, HEIGHT);
+  gradient.addColorStop(0, '#5A5A5A');
+  gradient.addColorStop(0.3, '#4A4A4A');
+  gradient.addColorStop(1, '#3A3A3A');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, HEIGHT - GROUND_HEIGHT, WIDTH, GROUND_HEIGHT);
+
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([15, 10]);
+  ctx.beginPath();
+  ctx.moveTo(0, HEIGHT - GROUND_HEIGHT + 15);
+  ctx.lineTo(WIDTH, HEIGHT - GROUND_HEIGHT + 15);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = '#3A3A3A';
+  for (let i = 0; i < WIDTH; i += 40) {
+    ctx.fillRect(i, HEIGHT - 15, 30, 5);
   }
 }
 
@@ -319,614 +344,647 @@ function drawPlane() {
   ctx.save();
   ctx.translate(plane.x + plane.width / 2, plane.y + plane.height / 2);
   ctx.rotate(plane.rotation);
-  ctx.fillStyle = '#E8E8E8';
-  ctx.strokeStyle = '#999';
-  ctx.lineWidth = 1.5;
+
+  const gradient = ctx.createLinearGradient(-plane.width / 2, 0, plane.width / 2, 0);
+  gradient.addColorStop(0, '#FF6B6B');
+  gradient.addColorStop(0.5, '#FF8E8E');
+  gradient.addColorStop(1, '#FFB5B5');
+  ctx.fillStyle = gradient;
+
   ctx.beginPath();
-  ctx.ellipse(0, 0, plane.width / 2, plane.height / 2.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = '#87CEEB';
-  ctx.beginPath();
-  ctx.ellipse(plane.width / 5, -plane.height / 6, 6, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#D0D0D0';
-  ctx.beginPath();
-  ctx.moveTo(-2, -plane.height / 2);
-  ctx.lineTo(-8, -plane.height / 2 - 10);
-  ctx.lineTo(4, -plane.height / 2);
+  ctx.moveTo(-plane.width / 2, 0);
+  ctx.lineTo(plane.width / 2, 0);
+  ctx.lineTo(plane.width / 2 - 5, -plane.height / 2);
+  ctx.lineTo(-plane.width / 2 + 5, -plane.height / 2);
   ctx.closePath();
   ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(-2, plane.height / 2);
-  ctx.lineTo(-8, plane.height / 2 + 10);
-  ctx.lineTo(4, plane.height / 2);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = '#C0C0C0';
-  ctx.beginPath();
-  ctx.moveTo(-plane.width / 2 + 2, 0);
-  ctx.lineTo(-plane.width / 2 - 6, -8);
-  ctx.lineTo(-plane.width / 2 + 6, 0);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  const propAngle = frameCount * 0.5;
-  ctx.strokeStyle = '#666';
+  ctx.strokeStyle = '#D63031';
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(plane.width / 2 + 2 + Math.cos(propAngle) * 6, -plane.height / 4);
-  ctx.lineTo(plane.width / 2 + 2 - Math.cos(propAngle) * 6, plane.height / 4);
   ctx.stroke();
-  if (gameState === 'playing' && frameCount % 2 === 0) {
-    trailParticles.push({
-      x: plane.x - 5,
-      y: plane.y + plane.height / 2 + (Math.random() - 0.5) * 6,
-      life: 15, maxLife: 15, size: 3 + Math.random() * 3
-    });
-  }
+
+  ctx.fillStyle = '#4ECDC4';
+  ctx.beginPath();
+  ctx.ellipse(0, -2, 12, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.moveTo(-plane.width / 2 + 8, plane.height / 2);
+  ctx.lineTo(-plane.width / 2 + 8, plane.height / 2 + 8);
+  ctx.lineTo(-plane.width / 2 + 3, plane.height / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(plane.width / 2 - 8, plane.height / 2);
+  ctx.lineTo(plane.width / 2 - 8, plane.height / 2 + 8);
+  ctx.lineTo(plane.width / 2 - 3, plane.height / 2);
+  ctx.closePath();
+  ctx.fill();
+
   ctx.restore();
 }
 
-function updateTrailParticles() {
-  for (let i = trailParticles.length - 1; i >= 0; i--) {
-    trailParticles[i].x -= buildingSpeed;
-    trailParticles[i].life--;
-    if (trailParticles[i].life <= 0) {
-      trailParticles.splice(i, 1);
-    }
-  }
-}
-
-function drawTrailParticles() {
-  trailParticles.forEach(p => {
-    const alpha = p.life / p.maxLife;
-    ctx.fillStyle = `rgba(255, ${150 + Math.random() * 100}, 50, ${alpha * 0.6})`;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
-    ctx.fill();
-  });
-}
-
 function drawBuildings() {
-  buildings.forEach(b => {
-    const bottomY = HEIGHT - GROUND_HEIGHT;
-    drawBuildingSection(b.x, 0, BUILDING_WIDTH, b.topHeight, true);
-    drawBuildingSection(b.x, b.topHeight + gapHeight, BUILDING_WIDTH, bottomY - (b.topHeight + gapHeight), false);
-  });
-}
+  buildings.forEach(building => {
+    const gradient = ctx.createLinearGradient(building.x, 0, building.x + BUILDING_WIDTH, 0);
+    gradient.addColorStop(0, '#4A90E2');
+    gradient.addColorStop(0.5, '#5BA3F5');
+    gradient.addColorStop(1, '#6BB6FF');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(building.x, 0, BUILDING_WIDTH, building.topHeight);
+    ctx.fillRect(building.x, building.topHeight + gapHeight, BUILDING_WIDTH, HEIGHT - GROUND_HEIGHT - building.topHeight - gapHeight);
 
-function drawBuildingSection(x, y, width, height, isTop) {
-  const gradient = ctx.createLinearGradient(x, 0, x + width, 0);
-  gradient.addColorStop(0, '#6B7B8D');
-  gradient.addColorStop(0.3, '#8899A6');
-  gradient.addColorStop(0.7, '#7A8B99');
-  gradient.addColorStop(1, '#5C6B7A');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(x, y, width, height);
-  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x, y, width, height);
-  const windowRows = Math.floor(height / 20);
-  const windowCols = Math.floor(width / 16);
-  for (let row = 1; row < windowRows; row++) {
-    for (let col = 1; col < windowCols; col++) {
-      const wx = x + col * 16;
-      const wy = y + row * 20;
-      if (wy > y + 5 && wy + 12 < y + height - 5) {
-        ctx.fillStyle = Math.random() > 0.5 ? 'rgba(200, 230, 255, 0.7)' : 'rgba(100, 120, 140, 0.5)';
-        ctx.fillRect(wx, wy, 8, 12);
+    ctx.strokeStyle = '#2E5C8A';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(building.x, 0, BUILDING_WIDTH, building.topHeight);
+    ctx.strokeRect(building.x, building.topHeight + gapHeight, BUILDING_WIDTH, HEIGHT - GROUND_HEIGHT - building.topHeight - gapHeight);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    const topRows = Math.floor(building.topHeight / 25);
+    for (let r = 0; r < topRows; r++) {
+      for (let c = 0; c < 3; c++) {
+        ctx.fillRect(building.x + c * 20 + 8, r * 25 + 8, 12, 15);
       }
     }
-  }
-  if (isTop) {
-    ctx.fillStyle = '#5C6B7A';
-    ctx.fillRect(x - 3, y + height - 5, width + 6, 8);
-  } else {
-    ctx.fillStyle = '#5C6B7A';
-    ctx.fillRect(x - 3, y, width + 6, 8);
-  }
-  if (height > 100 && (x + y) % 150 < 60) {
-    ctx.strokeStyle = '#5C6B7A';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    const antennaX = x + width / 2;
-    const antennaY = isTop ? y + height : y;
-    ctx.moveTo(antennaX, antennaY);
-    ctx.lineTo(antennaX, antennaY - 18);
-    ctx.stroke();
-    const blink = Math.sin(frameCount * 0.1) > 0;
-    ctx.fillStyle = blink ? '#FF4444' : '#660000';
-    ctx.beginPath();
-    ctx.arc(antennaX, antennaY - 18, 2, 0, Math.PI * 2);
-    ctx.fill();
+    const bottomStart = building.topHeight + gapHeight;
+    const bottomRows = Math.floor((HEIGHT - GROUND_HEIGHT - bottomStart) / 25);
+    for (let r = 0; r < bottomRows; r++) {
+      for (let c = 0; c < 3; c++) {
+        ctx.fillRect(building.x + c * 20 + 8, bottomStart + r * 25 + 8, 12, 15);
+      }
+    }
+
+    ctx.fillStyle = '#FF6B6B';
+    ctx.fillRect(building.x, building.topHeight - 5, BUILDING_WIDTH, 5);
+    ctx.fillRect(building.x, building.topHeight + gapHeight, BUILDING_WIDTH, 5);
+  });
+}
+
+function updatePlane() {
+  plane.velocity += GRAVITY;
+  plane.velocity = Math.max(MAX_RISE_SPEED, Math.min(plane.velocity, MAX_FALL_SPEED));
+  plane.y += plane.velocity;
+
+  plane.rotation = Math.min(Math.max(plane.velocity * 0.05, -0.5), 0.8);
+
+  if (frameCount % 3 === 0) {
+    trailParticles.push({
+      x: plane.x,
+      y: plane.y + plane.height / 2,
+      size: 4 + Math.random() * 3,
+      alpha: 0.6,
+      vx: -2 - Math.random(),
+      vy: (Math.random() - 0.5) * 2
+    });
   }
 }
 
 function updateBuildings() {
-  buildings.forEach((b, index) => {
-    b.x -= buildingSpeed;
-    if (!b.passed && b.x + BUILDING_WIDTH < plane.x) {
-      b.passed = true;
+  buildings.forEach(building => {
+    building.x -= buildingSpeed;
+    if (!building.passed && building.x + BUILDING_WIDTH < plane.x) {
+      building.passed = true;
       score++;
-      if (score % 5 === 0) {
-        gapHeight = Math.max(GAP_HEIGHT_MIN, gapHeight - 5);
-        buildingSpeed += 0.15;
-      }
-    }
-    if (b.x + BUILDING_WIDTH < 0) {
-      buildings.splice(index, 1);
-      const lastBuilding = buildings[buildings.length - 1];
-      const newX = lastBuilding ? lastBuilding.x + BUILDING_SPACING : WIDTH;
-      addBuilding(newX);
     }
   });
+
+  if (buildings.length > 0 && buildings[0].x + BUILDING_WIDTH < 0) {
+    buildings.shift();
+  }
+
+  if (buildings.length > 0 && buildings[buildings.length - 1].x < WIDTH - BUILDING_SPACING) {
+    addBuilding(buildings[buildings.length - 1].x + BUILDING_SPACING);
+  }
 }
 
 function checkCollision() {
-  const px = plane.x + 4;
-  const py = plane.y + 3;
-  const pw = plane.width - 8;
-  const ph = plane.height - 6;
-  if (py + ph >= HEIGHT - GROUND_HEIGHT || py <= 0) return true;
-  for (let b of buildings) {
-    if (px + pw > b.x && px < b.x + BUILDING_WIDTH) {
-      if (py < b.topHeight || py + ph > b.topHeight + gapHeight) return true;
+  if (plane.y + plane.height > HEIGHT - GROUND_HEIGHT || plane.y < 0) {
+    return true;
+  }
+
+  for (let building of buildings) {
+    if (plane.x + plane.width > building.x && plane.x < building.x + BUILDING_WIDTH) {
+      if (plane.y < building.topHeight || plane.y + plane.height > building.topHeight + gapHeight) {
+        return true;
+      }
     }
   }
+
   return false;
 }
 
 function createExplosion(x, y) {
   for (let i = 0; i < 30; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 4;
     particles.push({
-      x, y,
-      vx: (Math.random() - 0.5) * 8,
-      vy: (Math.random() - 0.5) * 8,
-      life: 30 + Math.random() * 20,
-      maxLife: 50,
-      size: 3 + Math.random() * 5,
-      color: Math.random() > 0.5 ? '#FF6B35' : '#FFD700'
+      x: x,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: 3 + Math.random() * 4,
+      color: ['#FF6B6B', '#FFD93D', '#FF8E8E', '#FFA07A'][Math.floor(Math.random() * 4)],
+      life: 1.0
     });
   }
 }
 
 function updateParticles() {
-  for (let i = particles.length - 1; i >= 0; i--) {
-    particles[i].x += particles[i].vx;
-    particles[i].y += particles[i].vy;
-    particles[i].vy += 0.15;
-    particles[i].life--;
-    if (particles[i].life <= 0) particles.splice(i, 1);
-  }
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.2;
+    p.life -= 0.02;
+  });
+  particles = particles.filter(p => p.life > 0);
 }
 
 function drawParticles() {
   particles.forEach(p => {
-    const alpha = p.life / p.maxLife;
+    ctx.globalAlpha = p.life;
     ctx.fillStyle = p.color;
-    ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
     ctx.fill();
+    ctx.globalAlpha = 1;
   });
-  ctx.globalAlpha = 1;
 }
 
-// ==================== UI绘制函数 ====================
-function drawButton(btn, label, isHovered) {
-  ctx.fillStyle = isHovered ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.15)';
+function updateTrailParticles() {
+  trailParticles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.alpha -= 0.02;
+  });
+  trailParticles = trailParticles.filter(p => p.alpha > 0);
+}
+
+function drawTrailParticles() {
+  trailParticles.forEach(p => {
+    ctx.globalAlpha = p.alpha;
+    ctx.fillStyle = '#FFD93D';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+}
+
+// ==================== UI绘制 ====================
+function drawButton(btn, isHovered, isSelected) {
+  ctx.save();
+  
+  let fillColor = '#4ECDC4';
+  if (isSelected) fillColor = '#FFD93D';
+  else if (isHovered) fillColor = '#5FE0D7';
+
+  const gradient = ctx.createLinearGradient(btn.x - btn.w/2, btn.y - btn.h/2, btn.x - btn.w/2, btn.y + btn.h/2);
+  gradient.addColorStop(0, fillColor);
+  gradient.addColorStop(1, isSelected ? '#FFC700' : (isHovered ? '#4ECDC4' : '#3EADA3'));
+  ctx.fillStyle = gradient;
+
+  ctx.shadowColor = 'rgba(0,0,0,0.3)';
+  ctx.shadowBlur = isHovered ? 15 : 8;
+  ctx.shadowOffsetY = isHovered ? 6 : 4;
+
+  const radius = 10;
   ctx.beginPath();
-  roundRect(ctx, btn.x - btn.w/2, btn.y - btn.h/2, btn.w, btn.h, 10);
+  ctx.moveTo(btn.x - btn.w/2 + radius, btn.y - btn.h/2);
+  ctx.lineTo(btn.x + btn.w/2 - radius, btn.y - btn.h/2);
+  ctx.quadraticCurveTo(btn.x + btn.w/2, btn.y - btn.h/2, btn.x + btn.w/2, btn.y - btn.h/2 + radius);
+  ctx.lineTo(btn.x + btn.w/2, btn.y + btn.h/2 - radius);
+  ctx.quadraticCurveTo(btn.x + btn.w/2, btn.y + btn.h/2, btn.x + btn.w/2 - radius, btn.y + btn.h/2);
+  ctx.lineTo(btn.x - btn.w/2 + radius, btn.y + btn.h/2);
+  ctx.quadraticCurveTo(btn.x - btn.w/2, btn.y + btn.h/2, btn.x - btn.w/2, btn.y + btn.h/2 - radius);
+  ctx.lineTo(btn.x - btn.w/2, btn.y - btn.h/2 + radius);
+  ctx.quadraticCurveTo(btn.x - btn.w/2, btn.y - btn.h/2, btn.x - btn.w/2 + radius, btn.y - btn.h/2);
+  ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = isHovered ? '#FFFFFF' : 'rgba(255,255,255,0.5)';
-  ctx.lineWidth = isHovered ? 2 : 1;
+
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  ctx.strokeStyle = '#2C8C84';
+  ctx.lineWidth = 2;
   ctx.stroke();
+
   ctx.fillStyle = '#FFFFFF';
-  ctx.font = isHovered ? 'bold 20px Arial' : '20px Arial';
+  ctx.font = 'bold 18px Arial';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, btn.x, btn.y);
-  ctx.textBaseline = 'alphabetic';
-}
+  ctx.fillText(btn.text, btn.x, btn.y);
 
-function drawToggleBtn(btn, label, isOn) {
-  drawButton(btn, label + (isOn ? ' ✓' : ' ✗'));
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-}
-
-function isPointInButton(px, py, btn) {
-  return px >= btn.x - btn.w/2 && px <= btn.x + btn.w/2 &&
-         py >= btn.y - btn.h/2 && py <= btn.y + btn.h/2;
+  ctx.restore();
 }
 
 function drawStartScreen() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  // 头像
-  const avatars = ['🛩', '✈', '🚀', '🛫'];
-  ctx.font = '48px Arial';
+  ctx.save();
+  ctx.font = 'bold 56px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText(avatars[userProfile.avatarIndex % avatars.length], WIDTH/2, HEIGHT/2 - 140);
+  ctx.fillStyle = '#FFD93D';
+  ctx.strokeStyle = '#2C3E50';
+  ctx.lineWidth = 6;
+  ctx.strokeText('都市飞翼', WIDTH / 2, HEIGHT / 2 - 120);
+  ctx.fillText('都市飞翼', WIDTH / 2, HEIGHT / 2 - 120);
+  ctx.restore();
 
-  // 用户名
-  ctx.font = '24px Arial';
+  ctx.save();
+  ctx.font = '18px Arial';
+  ctx.textAlign = 'center';
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillText(userProfile.name, WIDTH/2, HEIGHT/2 - 100);
+  ctx.fillText('点击屏幕或按空格键操作飞机', WIDTH / 2, HEIGHT / 2 - 50);
+  ctx.restore();
 
-  // 最高分
-  if (highScore > 0) {
-    ctx.font = '18px Arial';
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText('最高分: ' + highScore, WIDTH/2, HEIGHT/2 - 70);
-  }
-
-  // 标题
-  ctx.font = 'bold 52px Arial';
-  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-  ctx.lineWidth = 5;
-  ctx.fillStyle = '#FFFFFF';
-  ctx.strokeText('都 市 飞 翼', WIDTH / 2, HEIGHT / 2 - 190);
-  ctx.fillText('都 市 飞 翼', WIDTH / 2, HEIGHT / 2 - 190);
-
-  ctx.font = '22px Arial';
-  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-  ctx.lineWidth = 3;
-  ctx.fillStyle = '#E0F0FF';
-  ctx.strokeText('穿越都市大厦', WIDTH / 2, HEIGHT / 2 - 160);
-  ctx.fillText('穿越都市大厦', WIDTH / 2, HEIGHT / 2 - 160);
-
-  // 按钮
-  const btns = buttons.start;
-  btns.forEach(btn => {
+  buttons.start.forEach(btn => {
     const isHovered = hoveredButton === btn.id;
-    drawButton(btn, btn.text, isHovered);
+    drawButton(btn, isHovered, false);
+  });
+
+  ctx.save();
+  ctx.font = '14px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+  ctx.fillText(`当前难度: ${gameSettings.difficulty === 'easy' ? '简单' : gameSettings.difficulty === 'hard' ? '困难' : '普通'}`, WIDTH / 2, HEIGHT - 20);
+  ctx.restore();
+}
+
+function drawGameOverScreen() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  ctx.save();
+  ctx.font = 'bold 48px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FF6B6B';
+  ctx.strokeStyle = '#2C3E50';
+  ctx.lineWidth = 5;
+  ctx.strokeText('游戏结束', WIDTH / 2, HEIGHT / 2 - 150);
+  ctx.fillText('游戏结束', WIDTH / 2, HEIGHT / 2 - 150);
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = 'bold 32px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('得分: ' + score, WIDTH / 2, HEIGHT / 2 - 80);
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = '24px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFD93D';
+  ctx.fillText('本局最高: ' + highScore, WIDTH / 2, HEIGHT / 2 - 30);
+  ctx.restore();
+
+  buttons.gameOver.forEach(btn => {
+    const isHovered = hoveredButton === btn.id;
+    drawButton(btn, isHovered, false);
   });
 }
 
 function drawSettingsScreen() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  ctx.font = 'bold 32px Arial';
+  ctx.save();
+  ctx.font = 'bold 36px Arial';
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillText('设 置', WIDTH/2, 100);
+  ctx.fillStyle = '#FFD93D';
+  ctx.fillText('设置', WIDTH / 2, 110);
+  ctx.restore();
 
-  ctx.font = '20px Arial';
-  ctx.fillStyle = '#B0C4DE';
-  ctx.fillText('音效设置', WIDTH/2, 130);
+  buttons.settings.forEach(btn => {
+    const isHovered = hoveredButton === btn.id;
+    let isSelected = false;
 
-  drawToggleBtn(buttons.settings[1], '音效', gameSettings.soundEnabled);
-  drawToggleBtn(buttons.settings[2], '音乐', gameSettings.musicEnabled);
+    if (btn.type === 'toggle') {
+      if (btn.id === 'soundToggle') isSelected = gameSettings.soundEnabled;
+      if (btn.id === 'musicToggle') isSelected = gameSettings.musicEnabled;
+    } else if (btn.id === 'difficultyEasy') {
+      isSelected = gameSettings.difficulty === 'easy';
+    } else if (btn.id === 'difficultyNormal') {
+      isSelected = gameSettings.difficulty === 'normal';
+    } else if (btn.id === 'difficultyHard') {
+      isSelected = gameSettings.difficulty === 'hard';
+    }
 
-  ctx.font = '20px Arial';
-  ctx.fillStyle = '#B0C4DE';
-  ctx.fillText('难度选择', WIDTH/2, 280);
-
-  const diffBtns = [buttons.settings[3], buttons.settings[4], buttons.settings[5]];
-  const diffNames = ['简单', '普通', '困难'];
-  const diffKeys = ['easy', 'normal', 'hard'];
-  diffBtns.forEach((btn, i) => {
-    const isActive = gameSettings.difficulty === diffKeys[i];
-    ctx.fillStyle = isActive ? 'rgba(255,215,0,0.5)' : 'rgba(255,255,255,0.15)';
-    ctx.beginPath();
-    roundRect(ctx, btn.x - btn.w/2, btn.y - btn.h/2, btn.w, btn.h, 10);
-    ctx.fill();
-    ctx.strokeStyle = isActive ? '#FFD700' : 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = isActive ? 2 : 1;
-    ctx.stroke();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = isActive ? 'bold 18px Arial' : '18px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(diffNames[i], btn.x, btn.y);
-    ctx.textBaseline = 'alphabetic';
+    drawButton(btn, isHovered, isSelected);
   });
 
-  drawButton(buttons.settings[0], '← 返回', hoveredButton === 'back');
+  ctx.save();
+  ctx.font = '20px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('难度选择', WIDTH / 2, 280);
+  ctx.restore();
 }
 
 function drawProfileScreen() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  ctx.font = 'bold 32px Arial';
+  ctx.save();
+  ctx.font = 'bold 36px Arial';
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillText('个 人 资 料', WIDTH/2, 100);
+  ctx.fillStyle = '#FFD93D';
+  ctx.fillText('个人资料', WIDTH / 2, 110);
+  ctx.restore();
 
-  const avatars = ['🛩', '✈', '🚀', '🛫'];
   buttons.profile.forEach(btn => {
+    const isHovered = hoveredButton === btn.id;
+    let isSelected = false;
     if (btn.type === 'avatar') {
-      const isActive = userProfile.avatarIndex === btn.index;
-      ctx.fillStyle = isActive ? 'rgba(255,215,0,0.3)' : 'rgba(255,255,255,0.1)';
-      ctx.beginPath();
-      roundRect(ctx, btn.x - btn.w/2, btn.y - btn.h/2, btn.w, btn.h, 10);
-      ctx.fill();
-      ctx.strokeStyle = isActive ? '#FFD700' : 'rgba(255,255,255,0.3)';
-      ctx.lineWidth = isActive ? 2 : 1;
-      ctx.stroke();
-      ctx.font = '28px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(avatars[btn.index], btn.x, btn.y);
-      ctx.textBaseline = 'alphabetic';
+      isSelected = userProfile.avatarIndex === btn.index;
     }
+    drawButton(btn, isHovered, isSelected);
   });
 
+  ctx.save();
   ctx.font = '20px Arial';
+  ctx.textAlign = 'left';
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillText('用户名', WIDTH/2, 220);
+  ctx.fillText('昵称:', 60, 220);
+  ctx.restore();
 
-  if (showInput) {
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.beginPath();
-    roundRect(ctx, WIDTH/2 - 100, 230, 200, 40, 5);
-    ctx.fill();
-    ctx.fillStyle = '#000';
-    ctx.font = '20px Arial';
-    ctx.fillText(inputText, WIDTH/2, 255);
-  } else {
-    ctx.fillStyle = '#B0C4DE';
-    ctx.font = '20px Arial';
-    ctx.fillText(userProfile.name, WIDTH/2, 255);
-  }
+  const inputBoxX = 150;
+  const inputBoxY = 200;
+  const inputBoxW = 250;
+  const inputBoxH = 40;
 
-  drawButton(buttons.profile[5], '保存', hoveredButton === 'saveName');
-  drawButton(buttons.profile[6], '重置数据', hoveredButton === 'resetData');
-  drawButton(buttons.profile[0], '← 返回', hoveredButton === 'back');
+  ctx.fillStyle = showInput ? '#FFFFFF' : 'rgba(255,255,255,0.3)';
+  ctx.fillRect(inputBoxX, inputBoxY, inputBoxW, inputBoxH);
+  ctx.strokeStyle = showInput ? '#4ECDC4' : '#888888';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(inputBoxX, inputBoxY, inputBoxW, inputBoxH);
 
-  // 统计
+  ctx.fillStyle = '#000000';
   ctx.font = '18px Arial';
-  ctx.fillStyle = '#FFD700';
-  ctx.fillText('总游戏次数: ' + userProfile.totalGames, WIDTH/2, 320);
-  ctx.fillText('累计得分: ' + userProfile.totalScore, WIDTH/2, 350);
-  ctx.fillText('最高分: ' + userProfile.bestScore, WIDTH/2, 380);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const displayText = showInput ? inputText + '|' : (inputText || userProfile.name);
+  ctx.fillText(displayText, inputBoxX + 10, inputBoxY + inputBoxH / 2);
+
+  ctx.save();
+  ctx.font = '18px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#AAAAAA';
+  ctx.fillText('总游戏次数: ' + userProfile.totalGames, WIDTH / 2, 420);
+  ctx.fillText('总得分: ' + userProfile.totalScore, WIDTH / 2, 450);
+  ctx.restore();
 }
 
 function drawHistoryScreen() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  ctx.font = 'bold 32px Arial';
+  ctx.save();
+  ctx.font = 'bold 36px Arial';
   ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFD93D';
+  ctx.fillText('游戏记录', WIDTH / 2, 110);
+  ctx.restore();
+
+  buttons.history.forEach(btn => {
+    const isHovered = hoveredButton === btn.id;
+    drawButton(btn, isHovered, false);
+  });
+
+  ctx.save();
+  ctx.font = '18px Arial';
+  ctx.textAlign = 'left';
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillText('我的记录', WIDTH/2, 100);
 
   if (gameHistory.length === 0) {
-    ctx.font = '20px Arial';
-    ctx.fillStyle = '#B0C4DE';
-    ctx.fillText('暂无记录', WIDTH/2, HEIGHT/2);
+    ctx.textAlign = 'center';
+    ctx.fillText('暂无游戏记录', WIDTH / 2, HEIGHT / 2);
   } else {
-    ctx.font = '18px Arial';
-    gameHistory.forEach((record, i) => {
-      const y = 160 + i * 45;
-      ctx.fillStyle = 'rgba(255,255,255,0.1)';
-      ctx.beginPath();
-      roundRect(ctx, 40, y - 20, WIDTH - 80, 35, 8);
-      ctx.fill();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.textAlign = 'left';
-      ctx.fillText('#' + (i + 1), 60, y);
-      ctx.textAlign = 'center';
-      ctx.fillText(record.score + '分', WIDTH/2, y);
-      ctx.textAlign = 'right';
-      ctx.fillText(record.date, WIDTH - 60, y);
-      ctx.textAlign = 'center';
+    const startY = 160;
+    const lineHeight = 35;
+    gameHistory.slice(0, 10).forEach((record, index) => {
+      const y = startY + index * lineHeight;
+      const diffText = record.difficulty === 'easy' ? '简单' : record.difficulty === 'hard' ? '困难' : '普通';
+      ctx.fillText(`${index + 1}. ${record.date}  得分: ${record.score}  难度: ${diffText}`, 60, y);
     });
   }
-
-  drawButton(buttons.history[0], '← 返回', hoveredButton === 'back');
+  ctx.restore();
 }
 
-function drawGameOverScreen() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-  ctx.font = 'bold 52px Arial';
-  ctx.textAlign = 'center';
-  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-  ctx.lineWidth = 5;
-  ctx.fillStyle = '#FF6B6B';
-  ctx.strokeText('游 戏 结 束', WIDTH / 2, HEIGHT / 2 - 120);
-  ctx.fillText('游 戏 结 束', WIDTH / 2, HEIGHT / 2 - 120);
-
-  ctx.font = '28px Arial';
-  ctx.fillStyle = '#FFFFFF';
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-  ctx.strokeText('最终得分：' + score, WIDTH / 2, HEIGHT / 2 - 60);
-  ctx.fillText('最终得分：' + score, WIDTH / 2, HEIGHT / 2 - 60);
-
-  const isNewRecord = score >= highScore && score > 0;
-  ctx.font = '24px Arial';
-  ctx.fillStyle = '#FFD700';
-  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-  ctx.strokeText('最高分：' + highScore, WIDTH / 2, HEIGHT / 2 - 20);
-  ctx.fillText('最高分：' + highScore, WIDTH / 2, HEIGHT / 2 - 20);
-
-  if (isNewRecord) {
-    ctx.font = 'bold 20px Arial';
-    ctx.fillStyle = '#FFD700';
-    const blink = Math.sin(frameCount * 0.1) > 0;
-    if (blink) ctx.fillText('新纪录！', WIDTH / 2, HEIGHT / 2 + 20);
-  }
-
-  const btns = buttons.gameOver;
-  btns.forEach(btn => {
-    drawButton(btn, btn.text, hoveredButton === btn.id);
-  });
+// ==================== 按钮交互 ====================
+function isPointInButton(x, y, btn) {
+  return x >= btn.x - btn.w/2 && x <= btn.x + btn.w/2 &&
+         y >= btn.y - btn.h/2 && y <= btn.y + btn.h/2;
 }
 
-// ==================== 更新飞机 ====================
-function updatePlane() {
-  plane.velocity += GRAVITY;
-  plane.velocity = Math.max(MAX_RISE_SPEED, Math.min(MAX_FALL_SPEED, plane.velocity));
-  plane.y += plane.velocity;
-  if (plane.velocity < 0) {
-    plane.rotation = Math.max(-0.5, plane.velocity * 0.06);
-  } else {
-    plane.rotation = Math.min(1.2, plane.velocity * 0.08);
-  }
-}
-
-// ==================== 按钮点击处理 ====================
 function handleButtonClick(x, y) {
   let currentButtons = [];
-
+  
+  // 根据当前UI状态获取对应的按钮列表
   switch (uiState) {
-    case 'start':
-      currentButtons = buttons.start;
-      break;
-    case 'settings':
-      currentButtons = buttons.settings;
-      break;
-    case 'profile':
-      currentButtons = buttons.profile;
-      break;
-    case 'history':
-      currentButtons = buttons.history;
-      break;
-    case 'gameOver':
-      currentButtons = buttons.gameOver;
-      break;
+    case 'start': currentButtons = buttons.start; break;
+    case 'settings': currentButtons = buttons.settings; break;
+    case 'profile': currentButtons = buttons.profile; break;
+    case 'history': currentButtons = buttons.history; break;
+    case 'gameOver': currentButtons = buttons.gameOver; break;
   }
 
+  // 检查点击了哪个按钮
   for (let btn of currentButtons) {
     if (isPointInButton(x, y, btn)) {
-      processButtonClick(btn);
-      return;
+      handleButtonAction(btn.id);
+      return true;
     }
   }
-}
 
-function processButtonClick(btn) {
-  switch (uiState) {
-    case 'start':
-      if (btn.id === 'startGame') {
-        gameState = 'playing';
-        resetGame();
-        uiState = 'playing';
-      } else if (btn.id === 'myRecords') {
-        uiState = 'history';
-      } else if (btn.id === 'settings') {
-        uiState = 'settings';
-      } else if (btn.id === 'profile') {
-        uiState = 'profile';
-      }
-      break;
-    case 'settings':
-      if (btn.id === 'back') {
-        uiState = 'start';
-      } else if (btn.id === 'soundToggle') {
-        gameSettings.soundEnabled = !gameSettings.soundEnabled;
-        saveGameSettings();
-      } else if (btn.id === 'musicToggle') {
-        gameSettings.musicEnabled = !gameSettings.musicEnabled;
-        saveGameSettings();
-      } else if (btn.id.startsWith('difficulty')) {
-        const diff = btn.id.replace('difficulty', '').toLowerCase();
-        gameSettings.difficulty = diff;
-        saveGameSettings();
-      }
-      break;
-    case 'profile':
-      if (btn.id === 'back') {
-        uiState = 'start';
-        showInput = false;
-      } else if (btn.type === 'avatar') {
-        userProfile.avatarIndex = btn.index;
-        saveUserProfile();
-      } else if (btn.id === 'saveName') {
-        if (inputText.trim()) {
-          userProfile.name = inputText.trim();
-          saveUserProfile();
-        }
-        showInput = false;
-      } else if (btn.id === 'resetData') {
-        if (confirm('确定要重置所有数据吗？')) {
-          localStorage.removeItem('flappyCity_userProfile');
-          localStorage.removeItem('flappyCity_gameHistory');
-          localStorage.removeItem('flappyCity_highScore');
-          location.reload();
-        }
-      }
-      break;
-    case 'history':
-      if (btn.id === 'back') {
-        uiState = 'start';
-      }
-      break;
-    case 'gameOver':
-      if (btn.id === 'restart') {
-        gameState = 'playing';
-        resetGame();
-        uiState = 'playing';
-      } else if (btn.id === 'home') {
-        gameState = 'start';
-        resetGame();
-        uiState = 'start';
-      }
-      break;
-  }
-}
-
-// 开始界面输入框点击
-function handleStartScreenClick(x, y) {
-  if (showInput) {
-    if (x >= WIDTH/2 - 100 && x <= WIDTH/2 + 100 && y >= 230 && y <= 270) {
-      // 在输入框内，不处理
-      return;
+  // 处理个人资料界面的输入框点击
+  if (uiState === 'profile') {
+    const inputBoxX = 150;
+    const inputBoxY = 200;
+    const inputBoxW = 250;
+    const inputBoxH = 40;
+    if (x >= inputBoxX && x <= inputBoxX + inputBoxW && y >= inputBoxY && y <= inputBoxY + inputBoxH) {
+      showInput = true;
+      inputText = userProfile.name;
+      return true;
     } else {
       showInput = false;
-      return;
     }
   }
-  // 点击用户名区域，开始编辑
-  if (y >= 200 && y <= 280 && x >= WIDTH/2 - 100 && x <= WIDTH/2 + 100) {
-    showInput = true;
-    inputText = userProfile.name;
+
+  return false;
+}
+
+function handleButtonAction(btnId) {
+  console.log('Button clicked:', btnId);
+  
+  switch (btnId) {
+    case 'startGame':
+      gameState = 'playing';
+      uiState = 'playing';
+      resetGame();
+      break;
+      
+    case 'myRecords':
+      uiState = 'history';
+      break;
+      
+    case 'settings':
+      uiState = 'settings';
+      break;
+      
+    case 'profile':
+      uiState = 'profile';
+      break;
+      
+    case 'back':
+      uiState = 'start';
+      gameState = 'start';
+      break;
+      
+    case 'soundToggle':
+      gameSettings.soundEnabled = !gameSettings.soundEnabled;
+      saveGameSettings();
+      break;
+      
+    case 'musicToggle':
+      gameSettings.musicEnabled = !gameSettings.musicEnabled;
+      saveGameSettings();
+      break;
+      
+    case 'difficultyEasy':
+      gameSettings.difficulty = 'easy';
+      saveGameSettings();
+      break;
+      
+    case 'difficultyNormal':
+      gameSettings.difficulty = 'normal';
+      saveGameSettings();
+      break;
+      
+    case 'difficultyHard':
+      gameSettings.difficulty = 'hard';
+      saveGameSettings();
+      break;
+      
+    case 'saveName':
+      if (inputText.trim()) {
+        userProfile.name = inputText.trim();
+        saveUserProfile();
+        showInput = false;
+      }
+      break;
+      
+    case 'resetData':
+      if (confirm('确定要重置所有数据吗?')) {
+        userProfile = {
+          name: '飞行员',
+          avatarIndex: 0,
+          totalGames: 0,
+          totalScore: 0,
+          bestScore: 0
+        };
+        gameHistory = [];
+        saveUserProfile();
+        saveGameHistory();
+        inputText = userProfile.name;
+      }
+      break;
+      
+    case 'restart':
+      gameState = 'playing';
+      uiState = 'playing';
+      resetGame();
+      break;
+      
+    case 'home':
+      gameState = 'start';
+      uiState = 'start';
+      resetGame();
+      break;
+      
+    default:
+      // 处理头像选择
+      if (btnId.startsWith('avatar')) {
+        const index = parseInt(btnId.replace('avatar', ''));
+        userProfile.avatarIndex = index;
+        saveUserProfile();
+      }
+      break;
   }
 }
 
-// ==================== 按键处理 ====================
+function handleStartScreenClick(x, y) {
+  // 这个函数现在由handleButtonClick统一处理
+}
+
+// ==================== 飞行操作 ====================
 function flap() {
-  if (gameState === 'start') {
+  if (gameState === 'playing') {
+    plane.velocity = FLAP_POWER;
+  } else if (gameState === 'start') {
+    // 在开始界面按空格也可以开始游戏
     gameState = 'playing';
+    uiState = 'playing';
     resetGame();
-    plane.velocity = FLAP_POWER;
-  } else if (gameState === 'playing') {
-    plane.velocity = FLAP_POWER;
-  } else if (gameState === 'gameover') {
-    gameState = 'start';
-    particles = [];
-    trailParticles = [];
   }
 }
 
-document.addEventListener('keydown', (e) => {
-  if (e.code === 'Space') {
+function isFlapKey(e) {
+  return e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Enter';
+}
+
+function handleNameInputKeydown(e) {
+  if (!showInput) return false;
+
+  // 编辑用户名时,阻止游戏按键
+  if (e.code === 'Enter') {
     e.preventDefault();
-    if (gameState !== 'playing') {
-      flap();
+    if (inputText.trim()) {
+      userProfile.name = inputText.trim();
+      saveUserProfile();
     }
+    showInput = false;
+    return true;
   }
-});
+
+  if (e.code === 'Escape') {
+    e.preventDefault();
+    showInput = false;
+    inputText = userProfile.name;
+    return true;
+  }
+
+  if (e.code === 'Backspace') {
+    e.preventDefault();
+    inputText = inputText.slice(0, -1);
+    return true;
+  }
+
+  // 可输入字符
+  if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    inputText += e.key;
+    return true;
+  }
+
+  return true;
+}
+
+function handleGameKeydown(e) {
+  if (handleNameInputKeydown(e)) return;
+
+  if (isFlapKey(e)) {
+    e.preventDefault(); // 阻止空格滚动页面等默认行为
+    flap();
+  }
+}
+
+window.addEventListener('keydown', handleGameKeydown, { capture: true });
+
+// 页面加载/点击时主动聚焦画布,提升空格键触发稳定性
+window.addEventListener('load', () => canvas.focus());
+canvas.addEventListener('pointerdown', () => canvas.focus());
 
 // ==================== 触摸/点击支持 ====================
 let lastTapTime = 0;
@@ -957,25 +1015,15 @@ function handleCanvasClick(x, y) {
   lastTapTime = now;
   isProcessingClick = true;
 
-  // 游戏进行中，只做飞行操作
+  // 游戏进行中,只做飞行操作
   if (gameState === 'playing') {
     plane.velocity = FLAP_POWER;
     setTimeout(() => { isProcessingClick = false; }, 50);
     return;
   }
 
-  // 先处理 UI 状态转换（如从 gameover 回到 start）
+  // 处理按钮点击
   handleButtonClick(x, y);
-
-  // 状态可能已改变，重新检查当前状态
-  if (uiState === 'start') {
-    handleStartScreenClick(x, y);
-  }
-
-  // 如果第一次点击没处理按钮，且当前是 start 状态，再试一次
-  if (uiState === 'start') {
-    handleButtonClick(x, y);
-  }
 
   setTimeout(() => { isProcessingClick = false; }, 50);
 }
@@ -1030,22 +1078,17 @@ function gameLoop() {
 
     if (checkCollision()) {
       gameState = 'gameover';
+      uiState = 'gameOver';
       createExplosion(plane.x + plane.width / 2, plane.y + plane.height / 2);
 
       // 更新统计数据
       if (score > highScore) {
         highScore = score;
-        localStorage.setItem('flappyCity_highScore', highScore);
       }
       userProfile.totalGames++;
       userProfile.totalScore += score;
-      if (score > userProfile.bestScore) {
-        userProfile.bestScore = score;
-      }
       saveUserProfile();
       addHistoryRecord(score);
-
-      uiState = 'gameOver';
     }
   }
 
@@ -1063,7 +1106,7 @@ function gameLoop() {
   updateParticles();
   drawParticles();
 
-  // 绘制分数（游戏中）
+  // 绘制分数(游戏中)
   if (gameState === 'playing') {
     ctx.save();
     ctx.font = 'bold 42px Arial';
@@ -1071,15 +1114,15 @@ function gameLoop() {
     ctx.strokeStyle = 'rgba(0,0,0,0.5)';
     ctx.lineWidth = 4;
     ctx.fillStyle = '#FFFFFF';
-    ctx.strokeText('楼层：' + score, WIDTH / 2, 60);
-    ctx.fillText('楼层：' + score, WIDTH / 2, 60);
+    ctx.strokeText('楼层:' + score, WIDTH / 2, 60);
+    ctx.fillText('楼层:' + score, WIDTH / 2, 60);
     ctx.restore();
   }
 
   // 绘制UI界面
-  if (gameState === 'start') {
+  if (uiState === 'start') {
     drawStartScreen();
-  } else if (gameState === 'gameover') {
+  } else if (uiState === 'gameOver') {
     drawGameOverScreen();
   } else if (uiState === 'settings') {
     drawSettingsScreen();
