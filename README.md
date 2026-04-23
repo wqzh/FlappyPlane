@@ -1,6 +1,9 @@
-# 都市飞翼
 
 [English](README_en.md) | 中文
+
+- [点我，立刻玩](https://htmlpreview.github.io/?https://raw.githubusercontent.com/wqzh/FlappyPlane/blob/main/index.html)
+
+- [Android APK 安装包](https://github.com/wqzh/FlappyPlane/releases/latest)
 
 ---
 
@@ -27,4 +30,4 @@ AI生成的游戏
 
 - **网页版**：直接用浏览器打开项目根目录的 `index.html` 即可游玩，无需安装任何依赖。
 - **APK 版（Android）**：项目提供 `android-app` 工程，可打包为 APK 在 Android 设备上运行。
-  [apk安装包](https://github.com/wqzh/FlappyPlane/releases/latest)
+[Android APK 安装包](https://github.com/wqzh/FlappyPlane/releases/latest)

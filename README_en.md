@@ -1,6 +1,9 @@
-# 都市飞翼
 
 English | [中文](README.md)
+
+- [Click Me, Play Now](https://htmlpreview.github.io/?https://raw.githubusercontent.com/wqzh/FlappyPlane/blob/main/index.html)
+
+- [Android APK Installer](https://github.com/wqzh/FlappyPlane/releases/latest)
 
 ---
 
@@ -29,4 +32,4 @@ A Flappy Bird-style casual game set against the backdrop of a city skyline. Fly 
 
 - **Web version**: Open `index.html` in the project root with any modern browser. No installation or dependencies required.
 - **APK version (Android)**: The repository includes an `android-app` project that can be built and packaged as an APK for Android devices.
-[apk installer](https://github.com/wqzh/FlappyPlane/releases/latest)
+[Android APK Installer](https://github.com/wqzh/FlappyPlane/releases/latest)
